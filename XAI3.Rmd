@@ -1,0 +1,158 @@
+---
+title: "XAI 3: Model-Agnostic methods"
+output: html_notebook
+---
+
+## EXERCISE:
+
+Apply PDP to the regression example of predicting bike rentals. Fit a random forest approximation for the prediction of bike rentals (**cnt**). Use the partial dependence plot to visualize the relationships the model learned. Use the slides shown in class as model.  
+
+## QUESTION:
+
+Analyse the influence of **days since 2011, temperature, humidity** and **wind speed** on the predicted bike counts.
+
+
+```{r}
+library(dplyr)
+library(plotly)
+library(reshape2)
+library(lubridate)
+library(randomForestSRC)
+
+#setwd("/Users/cmonserr/OneDrive - UPV/Trabajo_2/Asignaturas/Evaluacion de modelos/Practicas/Practica 3/Bike-Sharing-Dataset")
+days <- read.csv("day.csv")
+hour <- read.csv("hour.csv")
+
+days$dteday <- as_date(days$dteday)
+days_since <- select(days, workingday, holiday, temp, hum, windspeed, cnt)
+days_since$days_since_2011 <- int_length(interval(ymd("2011-01-01"), days$dteday)) / (3600*24)
+days_since$SUMMER <- ifelse(days$season == 3, 1, 0)
+days_since$FALL <- ifelse(days$season == 4, 1, 0)
+days_since$WINTER <- ifelse(days$season == 1, 1, 0)
+days_since$MISTY <- ifelse(days$weathersit == 2, 1, 0)
+days_since$RAIN <- ifelse(days$weathersit == 3 | days$weathersit == 4, 1, 0)
+days_since$temp <- days_since$temp * 47 - 8
+days_since$hum <- days_since$hum * 100
+days_since$windspeed <- days_since$windspeed * 67
+
+rf <- rfsrc(cnt~., data=days_since)
+
+results <- select(days_since, days_since_2011, temp, hum, windspeed, cnt)
+nr <- nrow(days_since)
+for(c in names(results)[1:4])
+{
+  for(i in 1:nr){
+    r <- days_since
+    r[[c]] <- days_since[[c]][i]
+    sal <- predict(rf, r)$predicted
+    results[[c]][i] <- sum(sal) / nr
+  }
+}
+
+p1 = ggplot(days_since, aes(x=days_since_2011, y=results$days_since_2011)) + geom_line() + geom_rug(alpha = 0.1, sides = "b") + ylim(0,6000)  + ylab("Prediction") + xlab("Days Since 2011")
+p2 = ggplot(days_since, aes(x=temp, y=results$temp)) + geom_line() + geom_rug(alpha = 0.1, sides = "b") + ylim(0,6000) + theme(axis.text.y = element_blank(), axis.ticks.y = element_blank()) + xlab("Temperature")
+p3 = ggplot(days_since, aes(x=hum, y=results$hum)) + geom_line() + geom_rug(alpha = 0.1, sides = "b") + ylim(0,6000) + theme(axis.text.y = element_blank(), axis.ticks.y = element_blank()) + xlab("Humidity")
+p4 = ggplot(days_since, aes(x=windspeed, y=results$windspeed)) + geom_line() + geom_rug(alpha = 0.1, sides = "b") + ylim(0,6000) + theme(axis.text.y = element_blank(), axis.ticks.y = element_blank()) + xlab("Wind speed")
+
+subplot(p1,p2,p3,p4, shareY = TRUE, shareX = FALSE, titleX = TRUE)
+```
+
+Para el primer plot, days_since_2011, vemos que a medida que van aumentando los dias las ventas de bicicletas también aumenta hasta estabilizarse en torno a los 150 días y con una predicción que no supera las 4000 bicicletas diarias. Esta estabilidad dura hasta pasados los 350 días, donde vuelve a aumentar la predicción con un valor máximo en torno a 5750 bicicletas diarias en los días superiores a 600. A partir de aquí, la predicción comienza a decrecer hasta llegar a valores en torno a las 5000 bicicletas vendidas diariamente.
+
+Observando el segundo plot referente a la temperatura, vemos como con temperaturas bajas la predicción es mínima, en torno a 3000 ventas diarias, pero cuando la temperatura llega a los 4-5 grados, la predicción va aumentando hasta llegar a 15 grados, donde se estabiliza con valores predichos de ventas diarias superiores a 5000 bicicletas. A partir de 22-23 grados esta predicción comienza a decrecer hasta llegar a valores de 4700-4800 bicicletas cuando la temperatura es superior a 30 grados.
+
+En cuanto al tercer plot referente a la humedad, vemos que hay muy pocos ejemplos recogidos de ventas cuando la humedad es muy baja, y estas ventas predichas están en torno a las 4500 bicicletas. Este valor se mantendrá constante hasta llegar al 50% de humedad, donde la predicción de ventas comienza a decrecer hasta llegar a casi el 100% de humedad donde la predicción es de unas 3700-3800 bicicletas.
+
+Finalmente, el último plot referente a la velocidad del viento nos muestra que a menor velocidad del viento mayor es la predicción de ventas de bicicletas, por lo que la relación entre ambas variables es inversa. Vemos como con valores muy reducidos de velocidad del viento la predicción está en torno a 4500 bicicletas, pero cuando el viento es muy fuerte, los ejemplos recogidos de ventas son mucho menores y las ventas predichas están en torno a 4000 bicicletas.
+
+
+## EXERCISE:
+
+Generate a 2D Partial Dependency Plot with humidity and temperature to predict the number of bikes rented depending of those parameters.
+
+BE CAREFUL: due to the size, extract a set of random samples from the BBDD before generating the the data for the Partial Dependency Plot. 
+
+Show the density distribution of both input features with the 2D plot as shown in the class slides. 
+
+TIP: Use geom_tile() to generate the 2D plot. Set width and height to avoid holes. 
+
+## QUESTION:
+
+Interpret the results.
+
+
+```{r}
+
+sampled <- sample_n(days_since, 40)
+temp <- sampled$temp
+hum <- sampled$hum
+th <- inner_join(data.frame(temp),data.frame(hum), by=character())
+th$p <- 0
+
+for(i in 1:nrow(th)){
+  r <- days_since
+  r[["temp"]] <- th[["temp"]][i]
+  r[["hum"]] <- th[["hum"]][i]
+  
+  sal <- predict(rf, r)$predicted
+  th[["p"]][i] <- sum(sal) / nr
+}
+
+ggplot(th, aes(x=temp, y=hum)) + geom_tile(aes(fill = p, width = 10, height = 15)) + geom_rug(alpha = 0.01) + xlab("Temperature") + ylab("Humidity") + scale_fill_gradient(name = "Number of bikes")
+
+```
+
+Analizando este gráfico P2P podemos ver que con una humedad muy alta y una temperatura muy baja, el número de bicicletas vendidas es el menor, en torno a 3000, mientras que con temperaturas entre lo 20 y los 30 grados y niveles de humedad bajos las predicciones son máximas, superando las 5000 bicicletas. 
+
+Con esto dicho, podría parecer que a medida que aumenta la temperatura y disminuye la humedad, la predicción de ventas aumentaría, pero esto se produce hasta cierto punto, ya que si la temperatura supera los 30 grados vemos como la predicción de ventas de bicicletas comienza a disminuir.
+
+
+## EXERCISE:
+
+Apply the previous concepts to predict the **price** of a house from the database **kc_house_data.csv**. In this case, use again a random forest approximation for the prediction based on the features **bedrooms**, **bathrooms**, **sqft_living**, **sqft_lot**, **floors** and **yr_built**. 
+Use the partial dependence plot to visualize the relationships the model learned.
+
+BE CAREFUL: due to the size, extract a set of random samples from the BBDD before generating the data for the Partial Dependency Plot. 
+
+## QUESTION:
+
+Analyse the influence of **bedrooms, bathrooms, sqft_living** and **floors** on the predicted price.
+
+
+```{r}
+
+d <- read.csv("kc_house_data.csv")
+
+sampled <- sample_n(d, 1000)
+
+sampled <- select(sampled, bedrooms, bathrooms, sqft_living, sqft_lot, floors, yr_built, price)
+
+rf <- rfsrc(price~., data=sampled)
+
+results <- select(sampled, bedrooms, bathrooms, sqft_living, floors, price)
+nr <- nrow(sampled)
+for(c in names(results)[1:4])
+{
+  for(i in 1:nr){
+    r <- sampled
+    r[[c]] <- sampled[[c]][i]
+    sal <- predict(rf, r)$predicted
+    results[[c]][i] <- sum(sal) / nr
+  }
+}
+
+p1 <- ggplot(sampled, aes(x=bedrooms, y=results$bedrooms)) + geom_line() + geom_rug(alpha = 0.1, sides = "b") + ylab("Prediction") + xlab("Bedrooms") + xlim(0,7)
+p2 <- ggplot(sampled, aes(x=bathrooms, y=results$bathrooms)) + geom_line() + geom_rug(alpha = 0.1, sides = "b")+ xlab("Bathrooms") + xlim(0,5)
+p3 <- ggplot(sampled, aes(x=sqft_living, y=results$sqft_living)) + geom_line() + geom_rug(alpha = 0.1, sides = "b")+ xlab("Sqft Living") + xlim(0,10000)
+p4 <- ggplot(sampled, aes(x=floors, y=results$floors)) + geom_line() + geom_rug(alpha = 0.1, sides = "b")+ xlab("Floors")  + xlim(1,3)
+
+subplot(p1,p2,p3,p4, shareX = FALSE, titleX = TRUE)
+```
+
+Para el primer plot referente al número de habitaciones, vemos que tener 0 o 7 habitaciones pasa muy pocas veces, por lo que la predicción para estos casos no será muy fiable, y que los valores más típicos son 2 y 4 habitaciones. Fijándonos en la distribución vemos que la predicción del coste de una casa es máxima para 1 habitación, con un valor en torno a 558000, para 2 habitaciones disminuye un poco, para 3 vuelve a aumentar, para 4 habitaciones disminuye bastante, para 5 vuelve a amuentar, para 6 habitaciones disminuye hasta el mínimo, el cual es cercano a 535000, y para 7 habitaciones aumenta bastante.
+
+Observando el segundo plot sobre el número de baños, vemos como claramente, a medida que aumenta el número de baños, aumenta también la predicción del precio de una casa. Cuando la casa sólo tiene 1 baño, la predicción del coste no supera los 500000, mientras que si tiene 5 baños el precio predicho de la casa alcanza casi los 800000. Además es importante remarcar que el número de baños que tiene una casa se concentra entre 1 y 4, siendo los casos externos a este intervalo, es decir, menores a 1 baño o superiores a 4, menos frecuentes.
+
+En cuanto al tercer plot referente al square foot living, vemos que a medida que aumenta esta variable, la predicción del coste de una casa también aumenta. En los valores mínimos de square foot living la predicción del precio de la casa no supera los 400000, mientras que en los valores más altos supera los 110000. Además es destacable el hecho de que las casas que tiene square foot living superior a 5000 son muy poco frecuentes, es por eso que a partir de 5000 la distribución se mantiene constante en un valor en torno a 110000.
+
+Finalmente, en el último plot referente al número de plantas vemos como lo más atípico es tener 2.5 plantas. Por otro lado, el valor mínimo de predicción de precios, menor a 540000, se produce cuando sólo hay 1 planta, mientras que el valor más alto se produce cuando hay 3 plantas, casi 590000. Esto podría hacernos pensar que a mayor número de plantas, la predicción del coste de una casa es mayor, pero entre 1.5 y 2 plantas hay una disminución del precio predicho para una casa.
